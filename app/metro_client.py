@@ -11,6 +11,8 @@ from .models import MetroSnapshot
 
 
 class MetroError(Exception):
+    pass
+
 
 async def get_metro_snapshot() -> MetroSnapshot:
 
@@ -27,7 +29,7 @@ async def get_metro_snapshot() -> MetroSnapshot:
                 html = response.text
         except httpx.HTTPError as exc:
             raise MetroError(f"Failed to fetch metro page: {exc}") from exc
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:
             raise MetroError(f"Unexpected error fetching metro page: {exc}") from exc
 
         try:

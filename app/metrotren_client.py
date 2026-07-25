@@ -11,7 +11,11 @@ from .models import MetrotrenSnapshot
 
 
 class MetrotrenError(Exception):
+    pass
+
+
 async def get_metrotren_snapshot() -> MetrotrenSnapshot:
+
     async def factory() -> MetrotrenSnapshot:
         try:
             headers = {"User-Agent": settings.user_agent}
