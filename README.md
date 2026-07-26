@@ -1,6 +1,16 @@
 # red-api
 
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi&logoColor=white)
+![Pydantic](https://img.shields.io/badge/Pydantic-2.x-E92063?style=flat-square)
+![httpx](https://img.shields.io/badge/httpx-0.27+-0097FF?style=flat-square)
+![BeautifulSoup](https://img.shields.io/badge/BeautifulSoup-4.x-4B8BBE?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
+
 API HTTP no oficial y de código abierto para el sistema de transporte público Red Movilidad de Santiago. Extrae información de red.cl de los paraderos de RED, el Metro de Santiago y el servicio Tren Nos - Estación Central en un formato JSON limpio.
+
+##
+Actualmente, la API se encuentra disponible de forma pública en https://redapi.vpardos.dev, sin embargo esto puede cambiar. Su estado puede comprobarse en https://redapi.vpardos.dev/status.
 
 ## Características
 
@@ -22,7 +32,7 @@ red-api/
 │   ├── metrotren_parser.py # Parser HTML puro a MetrotrenSnapshot
 │   ├── cache.py            # Caches TTL en memoria
 │   ├── config.py           # Settings (URLs, timeouts, UA)
-│   ├── models.py           # Modelos de respuesta Pydantic
+│   ├── models.py           # Modelos de respuesta pydantic
 │   └── transformer.py      # Payload raw de bus a respuesta estructurada
 ├── requirements.txt
 └── README.md
@@ -70,7 +80,6 @@ Retorna
 ```json
 { "status": "ok" }
 ```
-Si es correcto.
 ### `GET /stops/{stop_id}`
 
 Retorna las llegadas para un paradero.
@@ -285,7 +294,7 @@ Retorna una sola estación por su slug (ej. `alameda`, `lo-valledor`, `p-a-c`, `
 curl http://localhost:8000/metrotren/stations/alameda
 ```
 
-La semántica de `status` / `raw_status_class` es la misma que para los endpoints de Metro. Para estaciones que son hubs intermodales, `connections` está poblado; de lo contrario `has_connections: false` y `connections: null`.
+La semántica de `status` / `raw_status_class` es la misma que para los endpoints de Metro. Para estaciones que son hubs intermodales, `connections` está poblado, de lo contrario `has_connections: false` y `connections: null`.
 
 
 
