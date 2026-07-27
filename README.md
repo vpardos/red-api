@@ -7,7 +7,7 @@
 ![BeautifulSoup](https://img.shields.io/badge/BeautifulSoup-4.x-4B8BBE?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
-API HTTP no oficial y de código abierto para el sistema de transporte público Red Movilidad de Santiago. Extrae información de red.cl de los paraderos de RED, el Metro de Santiago y el servicio Tren Nos - Estación Central en un formato JSON limpio.
+API HTTP no oficial y de código abierto para el sistema de transporte público Red Movilidad de Santiago. Extrae información de red.cl y metro.cl de los paraderos de RED, el Metro de Santiago y el servicio Tren Nos - Estación Central en un formato JSON limpio.
 
 ##
 Actualmente, la API se encuentra disponible de forma pública en https://redapi.vpardos.dev, sin embargo esto puede cambiar. Su estado puede comprobarse en https://redapi.vpardos.dev/health.
@@ -28,6 +28,7 @@ red-api/
 │   ├── client.py           # Cliente HTTP async a red.cl (buses)
 │   ├── metro_client.py     # Cliente HTTP async a red.cl (estado del metro)
 │   ├── metro_parser.py     # Parser HTML puro a MetroSnapshot
+│   ├── metro_cl_parser.py  # Parser HTML puro a MetroSnapshot desde metro.cl
 │   ├── metrotren_client.py # Cliente HTTP async a red.cl (estado del metrotren)
 │   ├── metrotren_parser.py # Parser HTML puro a MetrotrenSnapshot
 │   ├── cache.py            # Caches TTL en memoria
