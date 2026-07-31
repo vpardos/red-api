@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
+from .cache import NegativeStopResult, negative_stops_cache
 from .client import RedClError, get_prediction
 from .metro_client import MetroError, get_metro_snapshot
 from .metrotren_client import MetrotrenError, get_metrotren_snapshot
@@ -69,22 +70,56 @@ async def get_stop_arrivals(stop_id: str) -> StopArrivalResponse:
             detail="Invalid stop id. Must be 1-10 alphanumeric characters.",
         )
 
+    # Negative cache: short-circuit repeat probes to invalid or unknown
+    # stop IDs so we don't keep hitting red.cl with the same bad request.
+    cached_negative = await negative_stops_cache.get(stop_id)
+    if cached_negative is not None:
+        if cached_negative.kind == "http_error":
+            raise HTTPException(
+                status_code=cached_negative.http_status,
+                detail=cached_negative.http_detail,
+            )
+        if cached_negative.kind == "not_found" and cached_negative.body is not None:
+            return ErrorResponse(**cached_negative.body)
+
     try:
         raw = await get_prediction(stop_id)
     except RedClError as exc:
-        raise HTTPException(status_code=502, detail=f"Upstream error: {exc}") from exc
+        detail = f"Upstream error: {exc}"
+        await negative_stops_cache.set(
+            stop_id,
+            NegativeStopResult(
+                kind="http_error", http_status=502, http_detail=detail
+            ),
+        )
+        raise HTTPException(status_code=502, detail=detail) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Upstream service unavailable") from exc
+        await negative_stops_cache.set(
+            stop_id,
+            NegativeStopResult(
+                kind="http_error",
+                http_status=502,
+                http_detail="Upstream service unavailable",
+            ),
+        )
+        raise HTTPException(
+            status_code=502, detail="Upstream service unavailable"
+        ) from exc
 
     response = transform(raw)
     if not response.services and not response.name:
-        return ErrorResponse(
+        error_body = ErrorResponse(
             id=stop_id,
             name=None,
             status_code=1,
             status_description="Paradero no encontrado",
             services=[],
         )
+        await negative_stops_cache.set(
+            stop_id,
+            NegativeStopResult(kind="not_found", body=error_body.model_dump()),
+        )
+        return error_body
 
     return response
 
