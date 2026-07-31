@@ -16,6 +16,13 @@ class Settings:
 
     request_timeout_seconds: float = 10.0
 
+    # When False, disables the interactive documentation endpoints
+    # (/docs, /redoc) and the OpenAPI schema (/openapi.json).
+    # Recommended for public deployments to avoid exposing the full API surface.
+    # Override at deploy time, e.g.:
+    #     from app.config import Settings; settings = Settings(docs_enabled=False)
+    docs_enabled: bool = True
+
     user_agent: str = (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"

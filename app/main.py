@@ -6,6 +6,7 @@ from fastapi.responses import Response
 
 from .cache import NegativeStopResult, negative_stops_cache
 from .client import RedClError, get_prediction
+from .config import settings
 from .metro_client import MetroError, get_metro_snapshot
 from .metrotren_client import MetrotrenError, get_metrotren_snapshot
 from .models import (
@@ -19,10 +20,14 @@ from .models import (
 )
 from .transformer import transform
 
+_docs_enabled = settings.docs_enabled
 app = FastAPI(
     title="red-api",
     description="API HTTP no oficial y de código abierto para el sistema de transporte público Red Movilidad de Santiago. Extrae información de red.cl de los paraderos de RED, el Metro de Santiago y el servicio Tren Nos - Estación Central en un formato JSON limpio.",
     version="0.1.0",
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
 )
 
 app.add_middleware(
