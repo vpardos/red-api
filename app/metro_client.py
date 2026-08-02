@@ -56,9 +56,22 @@ def _merge(
 ) -> tuple[str, List[MetroLine]]:
     """Merge data from both sources.
 
-    metro.cl is authoritative for line-level status (faster updates).
-    red.cl provides full station lists and per-station CSS classes.
-    When metro.cl reports stations as affected, those override red.cl.
+    metro.cl is the authoritative source. Whenever metro.cl has data for a
+    line, its view wins on every discrepancy:
+
+    - Line status: metro.cl overrides red.cl.
+    - Per-station status: if metro.cl reports the line as operativa, every
+      station on that line is operativa in the merged output (any red.cl
+      per-station non-operativa status is overridden). If metro.cl reports
+      the line as con_problemas, only the stations metro.cl lists in
+      `affected_stations` are non-operativa, and the rest of the line is
+      operativa.
+
+    red.cl contributes the full station roster (slug, name, href, color)
+    and is the only source of station enumeration; metro.cl is only used to
+    declare which of those stations are affected.
+
+    If metro.cl is unavailable, we fall back to red.cl as-is.
 
     Returns (source_label, merged_lines).
     """
@@ -72,7 +85,7 @@ def _merge(
 
     if cl_map and not red_cl_lines:
         lines: List[MetroLine] = []
-        for item in metro_cl_data:
+        for item in cl_map.values():
             stations: List[MetroStation] = []
             for s in item.affected_stations:
                 stations.append(MetroStation(
@@ -95,6 +108,7 @@ def _merge(
     for line in red_cl_lines:
         cl_line = cl_map.get(line.id)
         if cl_line is None:
+            # metro.cl has no opinion on this line - trust red.cl.
             merged.append(line)
             continue
 
@@ -103,18 +117,22 @@ def _merge(
         affected_names = {s.name.lower() for s in cl_line.affected_stations}
         new_stations: List[MetroStation] = []
         for station in line.stations:
-            if _station_matches_affected(station, affected_names):
-                cl_station = _find_cl_station(station, cl_line.affected_stations)
-                new_status = cl_station.status if cl_station else StationStatus.CERRADA_TEMPORALMENTE
-                new_stations.append(MetroStation(
-                    id=station.id,
-                    name=station.name,
-                    status=new_status,
-                    raw_status_class=station.raw_status_class,
-                    detail_url=station.detail_url,
-                ))
+            cl_station = _find_cl_station(station, cl_line.affected_stations)
+            if cl_station is not None:
+                new_status = cl_station.status
+            elif new_line_status == LineStatus.OPERATIVA:
+                new_status = StationStatus.OPERATIVA
             else:
-                new_stations.append(station)
+                # metro.cl says the line has problems but didn't list this
+                # station among the affected ones
+                new_status = StationStatus.OPERATIVA
+            new_stations.append(MetroStation(
+                id=station.id,
+                name=station.name,
+                status=new_status,
+                raw_status_class=station.raw_status_class if new_status == StationStatus.DESCONOCIDO else None,
+                detail_url=station.detail_url,
+            ))
 
         merged.append(MetroLine(
             id=line.id,

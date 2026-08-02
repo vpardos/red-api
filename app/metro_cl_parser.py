@@ -12,8 +12,13 @@ _HTML_PARSER = "html.parser"
 
 _LINE_ICON_RE = re.compile(r"ico-l([\d]+a?)\.svg$")
 
+# Status icons currently emitted by metro.cl. Only `ico-estado-ok.svg` means
+# the line is fully operational. Anything else (e.g. `ico-estado-retraso.svg`
+# for delayed lines with station closures, `ico-estado-cerrado.svg` for fully
+# closed lines, plus any future icon metro.cl may introduce) is treated as
+# "con_problemas" so the affected-stations list is parsed.
 _STATUS_OK = "ico-estado-ok.svg"
-_STATUS_CERRADO = "ico-estado-cerrado.svg"
+_STATUS_NON_OK_PREFIX = "ico-estado-"
 
 _CONTINGENCY_STATUS_MAP: dict[str, StationStatus] = {
     "cierre temporal": StationStatus.CERRADA_TEMPORALMENTE,
@@ -49,10 +54,24 @@ def _extract_line_id(img_src: str) -> Optional[str]:
 
 
 def _parse_status_icon(img_src: str) -> LineStatus:
-    """Determine line status from the status icon filename."""
-    if _STATUS_CERRADO in img_src:
+    """Determine line status from the status icon filename.
+
+    metro.cl encodes the line state in the status icon name. Only the
+    `ico-estado-ok.svg` icon means a fully operational line. Any other
+    `ico-estado-*.svg` (e.g. `ico-estado-retraso.svg` for delayed lines with
+    station closures, `ico-estado-cerrado.svg` for fully closed lines) means
+    the line has problems and the affected-stations block should be parsed.
+    Unknown icons under the `ico-estado-` namespace are also treated as
+    problems so we degrade loudly (the affected-stations list will surface
+    the real state) instead of silently misreporting a closed line as OK.
+    """
+    if _STATUS_OK in img_src:
+        return LineStatus.OPERATIVA
+    if _STATUS_NON_OK_PREFIX in img_src:
         return LineStatus.CON_PROBLEMAS
-    return LineStatus.OPERATIVA
+    # Icon namespace we don't recognise at all - treat as problems so a
+    # misclassification is loud rather than silent.
+    return LineStatus.CON_PROBLEMAS
 
 
 def _parse_contingency_stations(ul: Tag) -> List[MetroClStation]:
