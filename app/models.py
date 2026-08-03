@@ -17,6 +17,8 @@ class Service(BaseModel):
     valid: bool
     status_description: str
     buses: List[BusArrival] = Field(default_factory=list)
+    is_24_7: bool = False
+    is_night_only: bool = False
 
 
 class StopArrivalResponse(BaseModel):
@@ -73,9 +75,9 @@ class MetroSnapshot(BaseModel):
 class MetroLineConnection(BaseModel):
     """A Metro line that a Metrotren station connects to (e.g. L1 from Alameda)."""
 
-    id: str  # e.g. "l1", "l4a"
-    name: str  # e.g. "Línea 1"
-    color: Optional[str] = None  # e.g. "#ec1d25"
+    id: str
+    name: str
+    color: Optional[str] = None
 
 
 class Connections(BaseModel):

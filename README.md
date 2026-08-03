@@ -14,7 +14,7 @@ Actualmente, la API se encuentra disponible de forma pública en https://redapi.
 
 ## Características
 
-- **`/stops/{stop_id}`** — Retorna las próximas llegadas de buses para un código de paradero, con distancia y tiempo (min/max minutos) por bus.
+- **`/stops/{stop_id}`** — Retorna las próximas llegadas de buses para un código de paradero, con distancia y tiempo (min/max minutos) por bus. Cada servicio se anota con su ventana operativa (`is_24_7`, `is_night_only`) según la [Malla nocturna de Red Movilidad](https://www.red.cl/mapas-y-horarios/bus/malla-nocturna/), y se marca como `Fuera de horario de operación` cuando el horario local de Santiago está fuera de su ventana y el upstream no reporta buses.
 - **`/metro/...`** — Estado en tiempo real del Metro, por línea y por estación, cada una etiquetada como `operativa` / `cerrada_temporalmente` / `no_habilitada`. Las líneas se marcan automáticamente como `con_problemas` si alguna de sus estaciones no está operativa.
 - **`/metrotren/...`** — Estado en tiempo real del Metrotren Nos, incluyendo información de conexiones intermodales.
 - **Cache de token y predicciones** — El token JWT se cachea por 55 min, las predicciones por 30 s, y los snapshots de metro y metrotren por 60 s.
@@ -117,7 +117,9 @@ curl http://localhost:8000/stops/PA417
           "min_arrival_time": 0,
           "max_arrival_time": 2
         }
-      ]
+      ],
+      "is_24_7": false,
+      "is_night_only": false
     },
     {
       "id": "505",
@@ -136,7 +138,9 @@ curl http://localhost:8000/stops/PA417
           "min_arrival_time": 0,
           "max_arrival_time": 4
         }
-      ]
+      ],
+      "is_24_7": false,
+      "is_night_only": false
     },
     {
       "id": "508",
@@ -155,7 +159,9 @@ curl http://localhost:8000/stops/PA417
           "min_arrival_time": 13,
           "max_arrival_time": 17
         }
-      ]
+      ],
+      "is_24_7": true,
+      "is_night_only": false
     },
     {
       "id": "402",
@@ -174,7 +180,9 @@ curl http://localhost:8000/stops/PA417
           "min_arrival_time": 3,
           "max_arrival_time": 7
         }
-      ]
+      ],
+      "is_24_7": false,
+      "is_night_only": false
     },
     {
       "id": "514",
@@ -193,7 +201,9 @@ curl http://localhost:8000/stops/PA417
           "min_arrival_time": 21,
           "max_arrival_time": 25
         }
-      ]
+      ],
+      "is_24_7": false,
+      "is_night_only": false
     }
   ]
 }
@@ -233,6 +243,39 @@ curl http://localhost:8000/stops/PA417
 | no interpretable / vacío | `0`   | `0`   |
 
 `max_arrival_time = -1` significa "más de `min` minutos" (abierto).
+
+#### Horario de operación e indicador 24/7
+
+Cada servicio lleva dos banderas que describen su horario, derivadas de la [Malla nocturna de Red Movilidad](https://www.red.cl/mapas-y-horarios/bus/malla-nocturna/):
+
+| Campo            | Significado                                                                 |
+| ---------------- | --------------------------------------------------------------------------- |
+| `is_24_7`        | El servicio opera las 24 horas del día (25 servicios en la malla nocturna). |
+| `is_night_only`  | El servicio es exclusivo de la noche (sufijo `N` en el código, 18 servicios).|
+
+Además, la API aplica la ventana operativa del servicio contra la hora local de Santiago (UTC-4). Si la hora actual está **fuera** de la ventana del servicio y red.cl no reporta buses para él, la respuesta se sobreescribe a un estado explícito:
+
+```json
+{
+  "id": "504",
+  "valid": false,
+  "status_description": "Fuera de horario de operación",
+  "buses": [],
+  "is_24_7": false,
+  "is_night_only": false
+}
+```
+
+Las ventanas aplicadas son:
+
+| Categoría                | Servicios                                                                 | Ventana (hora local Santiago) |
+| ------------------------ | ------------------------------------------------------------------------- | ----------------------------- |
+| 24/7                     | `104, 107, 119, 201, 207, 210, 210v, 230, 301, 303, 401, 403, 405, 407, 418, 426, 506, 508, 513, 516, 518, C02, F20, G08, J08` | siempre                     |
+| Diurno extendido         | `103, D09`                                                                | 05:30 – 01:30 (atraviesa medianoche) |
+| Nocturno (sufijo `N`)    | `109N, 203N, 204N, 262N, 264N, 302N, 346N, 432N, 541N, 712N, B02N, B30N, B31N, F30N, I08N, I10N, I11N, I14N` | 00:00 – 05:00                |
+| Diurno (resto)           | cualquier otro servicio                                                   | 05:30 – 23:59                |
+
+La sobreescritura a `Fuera de horario de operación` **no** se aplica cuando red.cl reporta al menos un bus (aunque sea fuera de horario, p. ej. un desvío nocturno): en ese caso la API respeta la respuesta del upstream para no enmascarar incidentes.
 
 ### `GET /metro/status`
 
