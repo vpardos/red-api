@@ -46,11 +46,17 @@ class TTLCache(Generic[T]):
             return entry.value
         return None
 
-    async def set(self, key: str, value: T) -> None:
+    async def set(
+        self,
+        key: str,
+        value: T,
+        ttl_seconds: Optional[int] = None,
+    ) -> None:
+        ttl = self._ttl if ttl_seconds is None else ttl_seconds
         async with self._lock:
             self._store[key] = CacheEntry(
                 value=value,
-                expires_at=time.monotonic() + self._ttl,
+                expires_at=time.monotonic() + ttl,
             )
 
     def invalidate(self, key: Optional[str] = None) -> None:
@@ -62,12 +68,6 @@ class TTLCache(Generic[T]):
 
 @dataclass
 class NegativeStopResult:
-    """Cached outcome of a failed /stops/{stop_id} lookup.
-
-    Used to short-circuit repeated probes (bad or unknown stop IDs) to the
-    upstream red.cl service, mitigating abuse without breaking the response
-    contract.
-    """
 
     kind: str  # "http_error" or "not_found"
     http_status: int = 502
@@ -81,3 +81,4 @@ prediction_cache: TTLCache[Dict[str, Any]] = TTLCache(ttl_seconds=30)
 metro_cache: TTLCache[Any] = TTLCache(ttl_seconds=60)
 metrotren_cache: TTLCache[Any] = TTLCache(ttl_seconds=60)
 negative_stops_cache: TTLCache[NegativeStopResult] = TTLCache(ttl_seconds=60)
+out_of_hours_cache: TTLCache[bool] = TTLCache(ttl_seconds=3600)

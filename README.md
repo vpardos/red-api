@@ -7,7 +7,7 @@
 ![BeautifulSoup](https://img.shields.io/badge/BeautifulSoup-4.x-4B8BBE?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
-API HTTP no oficial y de código abierto para el sistema de transporte público Red Movilidad de Santiago. Extrae información de red.cl y metro.cl de los paraderos de RED, el Metro de Santiago y el servicio Tren Nos - Estación Central en un formato JSON limpio.
+API no oficial y de código abierto para el sistema de transporte público Red Movilidad de Santiago. Extrae información de red.cl y metro.cl de los paraderos de RED, el Metro de Santiago y el servicio Tren Nos - Estación Central en un formato JSON limpio.
 
 ##
 Actualmente, la API se encuentra disponible de forma pública en https://redapi.vpardos.dev, sin embargo esto puede cambiar. Su estado puede comprobarse en https://redapi.vpardos.dev/health.
@@ -15,9 +15,10 @@ Actualmente, la API se encuentra disponible de forma pública en https://redapi.
 ## Características
 
 - **`/stops/{stop_id}`** — Retorna las próximas llegadas de buses para un código de paradero, con distancia y tiempo (min/max minutos) por bus. Cada servicio se anota con su ventana operativa (`is_24_7`, `is_night_only`) según la [Malla nocturna de Red Movilidad](https://www.red.cl/mapas-y-horarios/bus/malla-nocturna/), y se marca como `Fuera de horario de operación` cuando el horario local de Santiago está fuera de su ventana y el upstream no reporta buses.
+- **Malla nocturna auto-actualizada** — La API descarga y parsea la página de Malla nocturna al arrancar, y la refresca en segundo plano cada 6 horas (honrando `ETag`/`Last-Modified` para evitar reprocesar cuando no hay cambios). Si red.cl no responde al arrancar, se usa un snapshot fijo como fallback para que la API nunca quede sin datos. La frescura se expone en `/health`.
 - **`/metro/...`** — Estado en tiempo real del Metro, por línea y por estación, cada una etiquetada como `operativa` / `cerrada_temporalmente` / `no_habilitada`. Las líneas se marcan automáticamente como `con_problemas` si alguna de sus estaciones no está operativa.
 - **`/metrotren/...`** — Estado en tiempo real del Metrotren Nos, incluyendo información de conexiones intermodales.
-- **Cache de token y predicciones** — El token JWT se cachea por 55 min, las predicciones por 30 s, y los snapshots de metro y metrotren por 60 s.
+- **Cache de token y predicciones** — El token JWT se cachea por 55 min, las predicciones por 30 s, y los snapshots de metro y metrotren por 60 s. Las decisiones de "fuera de horario" se cachean por servicio, con TTL alineado a la próxima transición de ventana.
 
 ## Estructura del proyecto
 
@@ -79,8 +80,19 @@ Luego abrir:
 Retorna
 
 ```json
-{ "status": "ok" }
+{
+  "status": "ok",
+  "malla_nocturna": {
+    "source": "live",
+    "fetched_at": "2026-08-03T18:32:33.203751-04:00",
+    "services_24_7": 25,
+    "services_night_only": 18,
+    "services_extended": 2
+  }
+}
 ```
+
+`source` es `"live"` cuando los datos vienen de la última descarga de red.cl, o `"fallback"` cuando se está usando el snapshot harcodeado. `fetched_at` indica cuándo se descargó o instaló el snapshot actual.
 ### `GET /stops/{stop_id}`
 
 Retorna las llegadas para un paradero.

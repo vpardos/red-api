@@ -1,4 +1,6 @@
+import asyncio
 import re
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +9,11 @@ from fastapi.responses import Response
 from .cache import NegativeStopResult, negative_stops_cache
 from .client import RedClError, get_prediction
 from .config import settings
+from .malla_nocturna import (
+    malla_store,
+    periodic_refresh_loop,
+    refresh_malla_nocturna,
+)
 from .metro_client import MetroError, get_metro_snapshot
 from .metrotren_client import MetrotrenError, get_metrotren_snapshot
 from .models import (
@@ -20,6 +27,21 @@ from .models import (
 )
 from .transformer import transform
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await refresh_malla_nocturna()
+    refresh_task = asyncio.create_task(periodic_refresh_loop())
+    try:
+        yield
+    finally:
+        refresh_task.cancel()
+        try:
+            await refresh_task
+        except asyncio.CancelledError:
+            pass
+
+
 _docs_enabled = settings.docs_enabled
 app = FastAPI(
     title="red-api",
@@ -28,6 +50,7 @@ app = FastAPI(
     docs_url="/docs" if _docs_enabled else None,
     redoc_url="/redoc" if _docs_enabled else None,
     openapi_url="/openapi.json" if _docs_enabled else None,
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -45,7 +68,17 @@ STATION_SLUG_REGEX = re.compile(r"^[a-z0-9-]{1,80}$")
 
 @app.get("/health", tags=["meta"])
 async def health() -> dict:
-    return {"status": "ok"}
+    payload: dict = {"status": "ok"}
+    if malla_store.is_initialized():
+        data = malla_store.get()
+        payload["malla_nocturna"] = {
+            "source": data.source,
+            "fetched_at": data.fetched_at.isoformat(),
+            "services_24_7": len(data.services_24_7),
+            "services_night_only": len(data.services_night_only),
+            "services_extended": len(data.services_extended),
+        }
+    return payload
 
 
 _FAVICON_ICO = (
@@ -111,7 +144,7 @@ async def get_stop_arrivals(stop_id: str) -> StopArrivalResponse:
             status_code=502, detail="Upstream service unavailable"
         ) from exc
 
-    response = transform(raw)
+    response = await transform(raw)
     if not response.services and not response.name:
         error_body = ErrorResponse(
             id=stop_id,
@@ -134,7 +167,7 @@ async def _get_snapshot_or_502() -> MetroSnapshot:
         return await get_metro_snapshot()
     except MetroError as exc:
         raise HTTPException(status_code=502, detail=f"Upstream error: {exc}") from exc
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:
         raise HTTPException(
             status_code=502, detail="Upstream service unavailable"
         ) from exc
@@ -198,7 +231,7 @@ async def _get_metrotren_snapshot_or_502() -> MetrotrenSnapshot:
         return await get_metrotren_snapshot()
     except MetrotrenError as exc:
         raise HTTPException(status_code=502, detail=f"Upstream error: {exc}") from exc
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:
         raise HTTPException(
             status_code=502, detail="Upstream service unavailable"
         ) from exc

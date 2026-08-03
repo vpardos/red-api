@@ -1,8 +1,10 @@
 import re
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
+from .cache import out_of_hours_cache
+from .malla_nocturna import malla_store
 from .models import BusArrival, Service, StopArrivalResponse
 
 
@@ -20,29 +22,6 @@ _PARADERO_OFFLINE = "Sistema fuera de linea temporalmente"
 _PARADERO_OK = "Itinerario obtenido satisfactoriamente"
 _PARADERO_NOT_FOUND = "Paradero no encontrado"
 _OUT_OF_HOURS = "Fuera de horario de operación"
-
-_24_7_SERVICES: FrozenSet[str] = frozenset(
-    {
-        "104", "107", "119",
-        "201", "207", "210", "210v", "230",
-        "301", "303",
-        "401", "403", "405", "407", "418", "426",
-        "506", "508", "513", "516", "518",
-        "C02", "F20", "G08", "J08",
-    }
-)
-
-_NIGHT_ONLY_SERVICES: FrozenSet[str] = frozenset(
-    {
-        "109N", "203N", "204N", "262N", "264N", "302N", "346N",
-        "432N", "541N", "712N",
-        "B02N", "B30N", "B31N",
-        "F30N",
-        "I08N", "I10N", "I11N", "I14N",
-    }
-)
-
-_EXTENDED_DAY_SERVICES: FrozenSet[str] = frozenset({"103", "D09"})
 
 _DAY_START = time(5, 30)
 _DAY_END = time(23, 59)
@@ -168,13 +147,15 @@ def _build_service(service_item: Dict[str, Any]) -> Service:
 
     service_id = (service_item.get("servicio") or "").strip()
 
+    schedule = malla_store.get()
+
     return Service(
         id=service_id,
         valid=code in VALID_SERVICE_CODES,
         status_description=description,
         buses=_build_buses_for_service(service_item),
-        is_24_7=service_id in _24_7_SERVICES,
-        is_night_only=service_id in _NIGHT_ONLY_SERVICES,
+        is_24_7=schedule.is_24_7(service_id),
+        is_night_only=schedule.is_night_only(service_id),
     )
 
 
@@ -201,48 +182,42 @@ def _paradero_status_description(
 
 
 def _is_in_window(now: time, start: time, end: time) -> bool:
-    """Return True if `now` is in the half-open interval [start, end].
-
-    Handles windows that cross midnight (end < start), e.g. 05:30–01:30.
-    """
     if start <= end:
         return start <= now <= end
     return now >= start or now <= end
 
 
 def _get_operating_window(service_id: str) -> Tuple[bool, time, time]:
-    """Return (is_24_7, start, end) for a service based on the malla nocturna table.
-
-    24/7 services are flagged but the window is unused (never overridden).
-    """
-    if service_id in _24_7_SERVICES:
+    schedule = malla_store.get()
+    if schedule.is_24_7(service_id):
         return True, time(0, 0), time(23, 59)
-    if service_id in _NIGHT_ONLY_SERVICES:
+    if schedule.is_night_only(service_id):
         return False, _NIGHT_START, _NIGHT_END
-    if service_id in _EXTENDED_DAY_SERVICES:
+    if schedule.is_extended(service_id):
         return False, _EXTENDED_START, _EXTENDED_END
     return False, _DAY_START, _DAY_END
 
 
-def _apply_operating_window(service: Service, now: datetime) -> Service:
-    """Override a service to out-of-hours state when appropriate.
-
-    A service is only marked "Fuera de horario de operación" when BOTH:
-      - the current time is outside its operating window, AND
-      - the upstream red.cl response reported no buses for this service.
-
-    This avoids a false positive when a service is technically inside its
-    window but red.cl temporarily reports no buses (e.g. a deviation,
-    detour, or upstream outage): in that case we keep the upstream's
-    description so users can still see the reason.
-    """
-    is_24_7, start, end = _get_operating_window(service.id)
+def _seconds_until_next_window_start(service_id: str, now: datetime) -> int:
+    is_24_7, start, _ = _get_operating_window(service_id)
     if is_24_7:
-        return service
-    if service.buses:
-        return service
-    if _is_in_window(now.time(), start, end):
-        return service
+        return 0
+    current_time = now.time()
+    today = now.date()
+    tz = now.tzinfo
+
+    if start <= current_time:
+        next_start = datetime.combine(today + timedelta(days=1), start, tzinfo=tz)
+    elif start <= time(23, 59):
+        next_start = datetime.combine(today, start, tzinfo=tz)
+    else:
+        next_start = datetime.combine(today + timedelta(days=1), start, tzinfo=tz)
+
+    delta = (next_start - now).total_seconds()
+    return max(int(delta), 1)
+
+
+def _out_of_hours_override(service: Service) -> Service:
     return service.model_copy(
         update={
             "valid": False,
@@ -252,13 +227,31 @@ def _apply_operating_window(service: Service, now: datetime) -> Service:
     )
 
 
-def transform(raw: Dict[str, Any]) -> StopArrivalResponse:
+async def _apply_operating_window(service: Service, now: datetime) -> Service:
+    is_24_7, start, end = _get_operating_window(service.id)
+    if is_24_7:
+        return service
+    if service.buses:
+        return service
+    if _is_in_window(now.time(), start, end):
+        return service
+
+    cached = await out_of_hours_cache.get(service.id)
+    if cached:
+        return _out_of_hours_override(service)
+
+    ttl = _seconds_until_next_window_start(service.id, now)
+    await out_of_hours_cache.set(service.id, True, ttl_seconds=ttl)
+    return _out_of_hours_override(service)
+
+
+async def transform(raw: Dict[str, Any]) -> StopArrivalResponse:
     servicios = raw.get("servicios") or {}
     items: List[Dict[str, Any]] = servicios.get("item") or []
 
     services = [_build_service(item) for item in items]
     now = datetime.now(_SANTIAGO_TZ)
-    services = [_apply_operating_window(s, now) for s in services]
+    services = [await _apply_operating_window(s, now) for s in services]
 
     status_code = _paradero_status_code(raw.get("respuestaParadero"))
     status_description = _paradero_status_description(
